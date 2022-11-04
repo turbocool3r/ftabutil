@@ -189,7 +189,7 @@ fn main() {
 
             if let Some(ticket) = parser.ticket() {
                 let mut filename = PathBuf::new();
-                filename.push("ApImg4Ticker.der");
+                filename.push("ApImg4Ticket.der");
 
                 let mut ticket_path = out_dir.clone();
                 ticket_path.push(&filename);
