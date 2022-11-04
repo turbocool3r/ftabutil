@@ -7,14 +7,16 @@ mod manifest;
 mod parser;
 mod util;
 
-use crate::builder::Builder;
-use crate::manifest::{Manifest, SegmentDesc, Tag};
+use crate::{
+    builder::Builder,
+    manifest::{Manifest, SegmentDesc, Tag},
+};
 use clap::{arg, command, value_parser, Command};
 use log::LevelFilter;
 use parser::FtabParser;
 use simple_logger::SimpleLogger;
-use std::borrow::Cow;
 use std::{
+    borrow::Cow,
     fs::{self, OpenOptions},
     io::{ErrorKind as IoErrorKind, Write},
     path::{Path, PathBuf},

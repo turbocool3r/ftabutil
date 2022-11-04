@@ -1,9 +1,10 @@
 use crate::{format::*, manifest::Manifest, util};
-use std::borrow::Cow;
-use std::path::Path;
 use std::{
+    borrow::Cow,
     io::{self, Write},
-    mem, slice,
+    mem,
+    path::Path,
+    slice,
 };
 
 #[derive(Default, Clone, Debug)]
