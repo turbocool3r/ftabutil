@@ -33,6 +33,7 @@ pub mod error {
     }
 }
 
+use crate::format::*;
 pub use error::{OobSegmentError, ParseError};
 use std::slice;
 
@@ -61,6 +62,17 @@ fn match_magic(bytes: &[u8]) -> Result<&[u8], ParseError> {
     }
 }
 
+/// Takes a subslice of a slice by a relative offset and length. The absolute offset in the slice is
+/// determined by subtracting `slice_offset` from `offset`.
+fn cut_subslice(slice: &[u8], offset: usize, len: usize, slice_offset: usize) -> Option<&[u8]> {
+    let offset = offset.checked_sub(slice_offset)?;
+    if offset <= slice.len() && (slice.len() - offset) >= len {
+        Some(&slice[offset..offset + len])
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FtabParser<'a> {
     ticket: Option<&'a [u8]>,
@@ -76,11 +88,8 @@ pub struct FtabParser<'a> {
 }
 
 impl<'a> FtabParser<'a> {
-    const HEADER_LEN: usize = 48;
-    const SEGMENT_HEADER_LEN: usize = 16;
-
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, ParseError> {
-        if bytes.len() < Self::HEADER_LEN {
+        if bytes.len() < HEADER_LEN {
             return Err(ParseError::TooShort);
         }
 
@@ -89,7 +98,7 @@ impl<'a> FtabParser<'a> {
         let (bytes, unk_1) = get_u32_le(bytes);
         let (bytes, unk_2) = get_u32_le(bytes);
         let (bytes, unk_3) = get_u32_le(bytes);
-        let (bytes, ticket_off) = get_u32_le(bytes);
+        let (bytes, ticket_offset) = get_u32_le(bytes);
         let (bytes, ticket_len) = get_u32_le(bytes);
         let (bytes, unk_4) = get_u32_le(bytes);
         let (bytes, unk_5) = get_u32_le(bytes);
@@ -101,7 +110,7 @@ impl<'a> FtabParser<'a> {
         // in bounds.
         let segments_cnt: usize = segments_cnt.try_into().unwrap();
         let segments_len = segments_cnt
-            .checked_mul(Self::SEGMENT_HEADER_LEN)
+            .checked_mul(SEGMENT_HEADER_LEN)
             .ok_or(ParseError::OverflowingSegmentsLength)?;
         if segments_len > tail.len() {
             return Err(ParseError::OobSegmentsList);
@@ -112,30 +121,25 @@ impl<'a> FtabParser<'a> {
         // SAFETY: the length is verified not to overflow and to be less than the tail length. This
         // automatically implies that it's less than isize::MAX since this is also required for
         // tail.
-        let segments_ptr =
-            tail[..segments_len].as_ptr() as *const [u8; FtabParser::SEGMENT_HEADER_LEN];
+        let segments_ptr = tail[..segments_len].as_ptr() as *const [u8; SEGMENT_HEADER_LEN];
         let segments = unsafe { slice::from_raw_parts(segments_ptr, segments_cnt) };
+        let tail = &tail[segments_len..];
 
         // Ticket may or may not be present.
-        let ticket = if ticket_off != 0 || ticket_len != 0 {
+        let ticket = if ticket_offset != 0 || ticket_len != 0 {
             debug!(
                 "Ticket offset is {:#x}, length is {:#x}.",
-                ticket_off, ticket_len
+                ticket_offset, ticket_len
             );
 
-            let ticket_off: usize = ticket_off.try_into().unwrap();
+            let ticket_offset: usize = ticket_offset.try_into().unwrap();
             let ticket_len: usize = ticket_len.try_into().unwrap();
 
             // Ensure that ticket's range is in bounds and also doesn't overflow.
-            if ticket_off < Self::HEADER_LEN
-                || ticket_off > bytes.len()
-                || (bytes.len() - ticket_off) < ticket_len
-            {
-                return Err(ParseError::OobTicket);
-            }
-            let ticket_off = ticket_off - Self::HEADER_LEN;
+            let ticket = cut_subslice(tail, ticket_offset, ticket_len, HEADER_LEN + segments_len)
+                .ok_or(ParseError::OobTicket)?;
 
-            Some(&tail[ticket_off..ticket_off + ticket_len])
+            Some(ticket)
         } else {
             debug!("Ticket is not present.");
 
@@ -145,7 +149,7 @@ impl<'a> FtabParser<'a> {
         Ok(Self {
             ticket,
             segments,
-            tail: &tail[segments_len..],
+            tail,
             unk_0,
             unk_1,
             unk_2,
@@ -202,18 +206,9 @@ impl<'a> FtabParser<'a> {
             data: self.tail,
             // This should be the initial length of the slice provided to the constructor so this
             // will never overflow.
-            data_offset: self.segments.len() * Self::SEGMENT_HEADER_LEN + Self::HEADER_LEN,
+            data_offset: self.segments.len() * SEGMENT_HEADER_LEN + HEADER_LEN,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-#[repr(C)]
-pub struct SegmentHeader {
-    pub tag: [u8; 4],
-    pub seg_off: u32,
-    pub seg_len: u32,
-    pub unk: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -225,7 +220,7 @@ pub struct ParsedSegment<'a> {
 
 #[derive(Clone, Debug)]
 pub struct SegmentsParser<'a> {
-    headers: &'a [[u8; 16]],
+    headers: &'a [[u8; SEGMENT_HEADER_LEN]],
     data: &'a [u8],
     data_offset: usize,
 }
@@ -245,22 +240,19 @@ impl<'a> SegmentsParser<'a> {
         let tag: &[u8; 4] = tag.try_into().unwrap();
         let tag = *tag;
 
-        // Validate offset and length and extract segment data.
         let offset: usize = offset.try_into().unwrap();
         let len: usize = len.try_into().unwrap();
-        let data = self.data;
-        let data_offset = self.data_offset;
-        if offset < data_offset
-            || (offset - data_offset) > data.len()
-            || (data.len() - (offset - data_offset)) < len
-        {
-            return Err(OobSegmentError { tag });
-        }
-        let offset = offset - data_offset;
-        let data = &data[offset..offset + len];
+
+        // Validate offset and length and extract segment data.
+        let data = cut_subslice(self.data, offset, len, self.data_offset)
+            .ok_or(OobSegmentError { tag })?;
 
         self.headers = tail;
 
         Ok(Some(ParsedSegment { tag, data, unk }))
+    }
+
+    pub fn count(&self) -> usize {
+        self.headers.len()
     }
 }
