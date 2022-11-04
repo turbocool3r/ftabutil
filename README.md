@@ -11,9 +11,39 @@ A simple utility to build and unpack 'ftab' (aka 'rkosftab') images found in fir
 **ftabutil** introduces a concept of manifest — a TOML description of the 'ftab' file fields and contents. Manifests are automatically produced when unpacking 'ftab' files but can also be created manually. Here's an example of such a manifest:
 
 ```toml
+# Unknown fields that are ignored by all the available parsers, required.
+unk_0 = 83886336
+unk_1 = 4294967295
+unk_2 = 0
+unk_3 = 0
+unk_4 = 0
+unk_5 = 0
+unk_6 = 0
+# Path to the ticket to be included in the 'ftab' file, optional.
+ticket = "ApImg4Ticker.der"
 
+# List of files to be included as the file's segments.
+[[segments]]
+# Path to the file to be included as a segment.
+path = "rkos.bin"
+# The tag to be assigned to the segment. Can either be a 4-byte string
+# or an integer less than 2^32 that will be encoded as a big-endian 
+# 32-bit integer.
+tag = "rkos"
+# Unknown field that is always equal to zero.
+unk = 0
+
+# ...
 ```
+
+Such a manifest can be used with the `pack` subcommand like this:
+
+```shell
+ftabutil pack path/to/manifest.toml optional/path/to/ftab.bin
+```
+
+For more info see documentation for the `pack` subcommand.
 
 ## Unstable access to unknown fields
 
-Some fields of the format are unknown and unused at the time
+Some fields of the format are unknown and unused at the time of writing. The tool provides the access to these fields without really documenting them. Changing these may 
