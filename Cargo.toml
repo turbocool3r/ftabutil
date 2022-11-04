@@ -1,0 +1,15 @@
+[package]
+name = "ftabutil"
+authors = ["turbocooler <turbocooler@cocaine.ninja>"]
+license = "MIT OR Apache-2.0"
+description = "An utility to work with ftab (aka rkosftab) files."
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0"
+nom = "7.1"
+clap = { version = "4.0", features = ["cargo"] }
+log = "0.4"
+simple_logger = "4.0"
+hex = "0.4"
