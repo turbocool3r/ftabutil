@@ -8,7 +8,6 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0"
-nom = "7.1"
 clap = { version = "4.0", features = ["cargo"] }
 log = "0.4"
 simple_logger = "4.0"

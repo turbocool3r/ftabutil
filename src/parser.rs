@@ -1,11 +1,3 @@
-use nom::bytes::complete::take;
-use nom::{
-    bytes::complete::tag,
-    error::{Error as NomError, ErrorKind},
-    number::complete::le_u32,
-};
-use std::slice;
-
 pub mod error {
     use std::fmt;
     use thiserror::Error;
@@ -42,6 +34,32 @@ pub mod error {
 }
 
 pub use error::{OobSegmentError, ParseError};
+use std::slice;
+
+/// Reads a 32-bit little-endian integer from the start of a byte slice and returns a tuple of the
+/// slice's tail and the integer.
+///
+/// # Panics
+/// Will panic if the slice is shorter than 4 bytes.
+///
+/// # Why not nom?
+/// The previous implementation used nom for parsing, but it turned out to produce inefficient code.
+#[inline(always)]
+fn get_u32_le(bytes: &[u8]) -> (&[u8], u32) {
+    let (bytes, tail) = bytes.split_at(4);
+    let bytes: &[u8; 4] = bytes.try_into().unwrap();
+    (tail, u32::from_le_bytes(*bytes))
+}
+
+#[inline(always)]
+fn match_magic(bytes: &[u8]) -> Result<&[u8], ParseError> {
+    let (head, tail) = bytes.split_at(8);
+    if head == b"rkosftab" {
+        Ok(tail)
+    } else {
+        Err(ParseError::UnknownMagic)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct FtabParser<'a> {
@@ -62,29 +80,22 @@ impl<'a> FtabParser<'a> {
     const SEGMENT_HEADER_LEN: usize = 16;
 
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, ParseError> {
-        fn map_error(err: nom::Err<NomError<&[u8]>>) -> ParseError {
-            match err {
-                nom::Err::Incomplete(_) => ParseError::TooShort,
-                nom::Err::Error(e) | nom::Err::Failure(e) => match e.code {
-                    ErrorKind::Tag => ParseError::UnknownMagic,
-                    ErrorKind::Eof => ParseError::TooShort,
-                    _ => unreachable!("unexpected error code returned from parser"),
-                },
-            }
+        if bytes.len() < Self::HEADER_LEN {
+            return Err(ParseError::TooShort);
         }
 
         // Parse the header's fields.
-        let (bytes, unk_0) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, unk_1) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, unk_2) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, unk_3) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, ticket_off) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, ticket_len) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, unk_4) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, unk_5) = le_u32(bytes).map_err(map_error)?;
-        let (bytes, _) = tag(b"rkosftab")(bytes).map_err(map_error)?;
-        let (bytes, segments_cnt) = le_u32(bytes).map_err(map_error)?;
-        let (tail, unk_6) = le_u32(bytes).map_err(map_error)?;
+        let (bytes, unk_0) = get_u32_le(bytes);
+        let (bytes, unk_1) = get_u32_le(bytes);
+        let (bytes, unk_2) = get_u32_le(bytes);
+        let (bytes, unk_3) = get_u32_le(bytes);
+        let (bytes, ticket_off) = get_u32_le(bytes);
+        let (bytes, ticket_len) = get_u32_le(bytes);
+        let (bytes, unk_4) = get_u32_le(bytes);
+        let (bytes, unk_5) = get_u32_le(bytes);
+        let bytes = match_magic(bytes)?;
+        let (bytes, segments_cnt) = get_u32_le(bytes);
+        let (tail, unk_6) = get_u32_le(bytes);
 
         // Calculate the lengths of the segments list and validate that it doesn't overflow and is
         // in bounds.
@@ -225,10 +236,10 @@ impl<'a> SegmentsParser<'a> {
             return Ok(None);
         };
 
-        let (bytes, tag) = take::<_, _, NomError<_>>(4usize)(&bytes[..]).unwrap();
-        let (bytes, offset) = le_u32::<_, NomError<_>>(bytes).unwrap();
-        let (bytes, len) = le_u32::<_, NomError<_>>(bytes).unwrap();
-        let (_, unk) = le_u32::<_, NomError<_>>(bytes).unwrap();
+        let (tag, bytes) = bytes.split_at(4);
+        let (bytes, offset) = get_u32_le(bytes);
+        let (bytes, len) = get_u32_le(bytes);
+        let (_, unk) = get_u32_le(bytes);
 
         // Extract the tag as a byte value.
         let tag: &[u8; 4] = tag.try_into().unwrap();

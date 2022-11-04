@@ -46,8 +46,8 @@ fn save_file(name: &str, path: &Path, data: &[u8], overwrite: bool) -> Result<()
     }
 }
 
-fn path_for_tag(out_dir: &PathBuf, tag: [u8; 4]) -> PathBuf {
-    let mut path = out_dir.clone();
+fn path_for_tag(out_dir: &Path, tag: [u8; 4]) -> PathBuf {
+    let mut path = out_dir.to_path_buf();
 
     let mut filename = if tag.iter().all(u8::is_ascii_alphanumeric) {
         String::from_utf8_lossy(&tag).into_owned()
