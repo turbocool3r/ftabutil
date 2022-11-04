@@ -46,4 +46,17 @@ For more info see documentation for the `pack` subcommand.
 
 ## Unstable access to unknown fields
 
-Some fields of the format are unknown and unused at the time of writing. The tool provides the access to these fields without really documenting them. Changing these may 
+Some fields of the format are unknown and unused at the time of writing. The tool provides the access to these fields without really documenting them. In the future the names for these fields is very likely to change, so you shouldn't rely on the manifest format to be stable.
+
+## License
+
+Licensed under either of
+
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
