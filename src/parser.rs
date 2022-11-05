@@ -1,5 +1,5 @@
 pub mod error {
-    use std::fmt;
+    use std::{error::Error, fmt};
     use thiserror::Error;
 
     #[derive(Error, Debug)]
@@ -31,6 +31,8 @@ pub mod error {
             )
         }
     }
+
+    impl Error for OobSegmentError {}
 }
 
 use crate::format::*;
