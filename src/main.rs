@@ -2,6 +2,7 @@
 extern crate log;
 
 mod builder;
+mod error;
 mod format;
 mod manifest;
 mod parser;
@@ -9,44 +10,18 @@ mod util;
 
 use crate::{
     builder::Builder,
+    error::{FileOpError, PackError, UnpackError},
     manifest::{Manifest, SegmentDesc, Tag},
+    parser::FtabParser,
 };
 use clap::{arg, command, value_parser, Command};
 use log::LevelFilter;
-use parser::FtabParser;
 use simple_logger::SimpleLogger;
 use std::{
-    borrow::Cow,
-    fs::{self, OpenOptions},
-    io::{ErrorKind as IoErrorKind, Write},
+    fs,
+    io::ErrorKind as IoErrorKind,
     path::{Path, PathBuf},
 };
-
-fn save_file(name: &str, path: &Path, data: &[u8], overwrite: bool) -> Result<(), ()> {
-    let result = OpenOptions::new()
-        .write(true)
-        .create_new(!overwrite)
-        .create(overwrite)
-        .truncate(overwrite)
-        .open(path);
-
-    match result {
-        Ok(mut f) => match f.write_all(data) {
-            Ok(()) => {
-                info!("Saved {} to {}.", name, path.display());
-                Ok(())
-            }
-            Err(e) => {
-                error!("Couldn't save {} to {}: {}", name, path.display(), e);
-                Err(())
-            }
-        },
-        Err(e) => {
-            error!("Couldn't create file at {}: {}", path.display(), e);
-            Err(())
-        }
-    }
-}
 
 fn do_print_header(parser: &FtabParser) {
     println!("unk_0: {:#08x}", parser.unk_0());
@@ -56,6 +31,129 @@ fn do_print_header(parser: &FtabParser) {
     println!("unk_4: {:#08x}", parser.unk_4());
     println!("unk_5: {:#08x}", parser.unk_5());
     println!("unk_6: {:#08x}", parser.unk_6());
+}
+
+fn filename_for_tag(tag: [u8; 4]) -> PathBuf {
+    let filename = if tag.iter().all(u8::is_ascii_alphanumeric) {
+        let tag_str = std::str::from_utf8(&tag).unwrap();
+        format!("{}.bin", tag_str)
+    } else {
+        format!("tag_{}.bin", hex::encode(tag))
+    };
+
+    let mut path = PathBuf::new();
+    path.push(filename);
+
+    path
+}
+
+fn do_unpack<'a>(
+    in_file: &'a Path,
+    out_dir: Option<&'a Path>,
+    overwrite: bool,
+    create_parent_dirs: bool,
+    print_header: bool,
+) -> Result<(), UnpackError<'a>> {
+    use UnpackError::*;
+
+    let data = util::read_file("input file", in_file)?;
+
+    info!("Loaded file at path {}.", in_file.display());
+
+    if let Some(out_dir) = out_dir {
+        if create_parent_dirs {
+            fs::create_dir_all(out_dir)
+        } else {
+            fs::create_dir(out_dir)
+        }
+        .or_else(|e| match e.kind() {
+            IoErrorKind::AlreadyExists => {
+                if !out_dir.is_dir() {
+                    Err(OutDirIsNotDir(out_dir))
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Err(FailedToCreateOutDir(out_dir, e)),
+        })?;
+    }
+
+    // Parse the header and initialize the parser.
+    let parser = FtabParser::from_bytes(&data).map_err(|e| HeaderParseError(in_file, e))?;
+
+    let mut the_manifest = Manifest::with_parser(&parser);
+    let manifest_path = util::qualify_path_if_needed("manifest.toml", out_dir);
+
+    if print_header {
+        do_print_header(&parser);
+    }
+
+    if let Some(ticket) = parser.ticket() {
+        let mut filename = PathBuf::new();
+        filename.push("ApImg4Ticket.der");
+
+        let ticket_path = util::qualify_path_if_needed(&filename, out_dir);
+        util::save_file("ticket", ticket_path, ticket, overwrite)?;
+
+        the_manifest.ticket = Some(filename);
+    }
+
+    let mut segments_parser = parser.segments();
+    the_manifest.segments.reserve(segments_parser.count());
+    loop {
+        match segments_parser.next_segment()? {
+            None => {
+                let serialized_manifest = toml::to_vec(&the_manifest).unwrap();
+                util::save_file("manifest", manifest_path, &serialized_manifest, overwrite)?;
+
+                info!("Done.");
+
+                break Ok(());
+            }
+            Some(segment) => {
+                let filename = filename_for_tag(segment.tag);
+                let path = util::qualify_path_if_needed(&filename, out_dir);
+
+                util::save_file("segment", path, segment.data, overwrite)?;
+
+                the_manifest.segments.push(SegmentDesc {
+                    path: filename,
+                    tag: Tag(segment.tag),
+                    unk: segment.unk,
+                });
+            }
+        }
+    }
+}
+
+fn do_pack<'a>(
+    manifest_path: &'a Path,
+    out_path: Option<&'a Path>,
+    overwrite: bool,
+) -> Result<(), PackError<'a>> {
+    use PackError::*;
+
+    // read and parse the manifest ensuring that the parent directory in the manifest's path exists
+    let manifest_data = util::read_file("manifest", manifest_path)?;
+    let the_manifest = toml::from_slice::<Manifest>(&manifest_data)
+        .map_err(|e| ManifestParseError(manifest_path, e))?;
+
+    // create the output file
+    let input_dir = manifest_path.parent();
+    let out_file_path = util::qualify_path_or_default_if_needed(out_path, input_dir, "ftab.bin");
+    let mut out_file = util::create_file("output file", &out_file_path, overwrite)?;
+
+    debug!("Writing ftab to {}.", out_file_path.display());
+
+    // make a builder from the manifest and build the ftab file
+    let builder = Builder::with_manifest(&the_manifest, input_dir)?;
+    builder.write_to(&mut out_file).map_err(|error| {
+        FileOpError::make_write("output file", out_file_path.to_path_buf(), error)
+    })?;
+
+    info!("Done.");
+
+    Ok(())
 }
 
 fn main() {
@@ -103,6 +201,10 @@ fn main() {
         )
         .subcommand(
             Command::new("pack")
+                .arg(arg!(overwrite: -o --overwrite).help(
+                    "Overwrites the output file instead of stopping when the file exists at the \
+                    specified path.",
+                ))
                 .arg(
                     arg!(manifest: <MANIFEST_PATH>)
                         .value_parser(value_parser!(PathBuf))
@@ -139,168 +241,25 @@ fn main() {
             let overwrite = sub_matches.get_flag("overwrite");
             let create_parent_dirs = sub_matches.get_flag("create_parent_dirs");
 
-            let data = match util::read_file(&in_file) {
-                Ok(data) => data,
-                Err(e) => {
-                    error!("Couldn't open file at {}: {}", in_file.display(), e);
-                    return;
-                }
-            };
-
-            info!("Loaded file at path {}.", in_file.display());
-
-            if let Some((p, e)) = out_dir.as_ref().and_then(|p| {
-                if create_parent_dirs {
-                    fs::create_dir_all(p)
-                } else {
-                    fs::create_dir(p)
-                }
-                .err()
-                .map(|e| (p, e))
-            }) {
-                match e.kind() {
-                    IoErrorKind::AlreadyExists => {
-                        if !p.is_dir() {
-                            error!("Path {} exists and is not a directory.", p.display());
-                            return;
-                        }
-                    }
-                    _ => {
-                        error!("Couldn't create target directory at {}: {}", p.display(), e);
-                        return;
-                    }
-                }
-            }
-            let out_dir = out_dir.unwrap_or_else(PathBuf::new);
-
-            let parser = match FtabParser::from_bytes(&data) {
-                Ok(parser) => parser,
-                Err(e) => {
-                    error!("Failed to parse file at {}: {}", in_file.display(), e);
-                    return;
-                }
-            };
-
-            let mut the_manifest = Manifest::with_parser(&parser);
-            let mut manifest_path = out_dir.clone();
-            manifest_path.push("manifest.toml");
-
-            if print_header {
-                do_print_header(&parser);
-            }
-
-            if let Some(ticket) = parser.ticket() {
-                let mut filename = PathBuf::new();
-                filename.push("ApImg4Ticket.der");
-
-                let mut ticket_path = out_dir.clone();
-                ticket_path.push(&filename);
-
-                the_manifest.ticket = Some(filename);
-
-                if save_file("ticket", &ticket_path, ticket, overwrite).is_err() {
-                    return;
-                }
-            }
-
-            let mut segments_parser = parser.segments();
-            the_manifest.segments.reserve(segments_parser.count());
-            loop {
-                match segments_parser.next_segment() {
-                    Ok(None) => {
-                        let serialized_manifest = toml::to_vec(&the_manifest).unwrap();
-
-                        if save_file("manifest", &manifest_path, &serialized_manifest, overwrite)
-                            .is_err()
-                        {
-                            return;
-                        }
-
-                        info!("Done.");
-                        break;
-                    }
-                    Ok(Some(segment)) => {
-                        let filename = util::filename_for_tag(segment.tag);
-                        let mut path = out_dir.clone();
-                        path.push(&filename);
-
-                        if save_file("segment", &path, segment.data, overwrite).is_err() {
-                            return;
-                        }
-
-                        the_manifest.segments.push(SegmentDesc {
-                            path: filename,
-                            tag: Tag(segment.tag),
-                            unk: segment.unk,
-                        });
-                    }
-                    Err(e) => {
-                        error!("Couldn't save segments: {}", e);
-                    }
-                }
+            if let Err(e) = do_unpack(
+                &in_file,
+                out_dir.as_deref(),
+                overwrite,
+                create_parent_dirs,
+                print_header,
+            ) {
+                error!("{}", e);
             }
         }
         Some(("pack", sub_matches)) => {
             let manifest_path = sub_matches.get_one::<PathBuf>("manifest").unwrap();
-            let manifest_data = match util::read_file(manifest_path) {
-                Ok(data) => data,
-                Err(e) => {
-                    error!(
-                        "Failed to read a manifest file at {}: {}",
-                        manifest_path.display(),
-                        e
-                    );
-                    return;
-                }
-            };
-
-            let the_manifest = match toml::from_slice::<Manifest>(&manifest_data) {
-                Ok(m) => m,
-                Err(e) => {
-                    error!(
-                        "Failed to parse manifest file at {}: {}",
-                        manifest_path.display(),
-                        e
-                    );
-                    return;
-                }
-            };
-
-            let input_dir = manifest_path.parent().unwrap();
-
-            let out_file_path = sub_matches
+            let out_file = sub_matches
                 .get_one::<PathBuf>("out_file")
-                .map(|p| Cow::from(p.as_path()))
-                .unwrap_or_else(|| {
-                    let mut path = manifest_path.parent().unwrap().to_path_buf();
-                    path.push("ftab.bin");
-                    Cow::from(path)
-                });
-            let mut out_file = match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&out_file_path)
-            {
-                Ok(f) => f,
-                Err(e) => {
-                    error!(
-                        "Failed to create output file at {}: {}",
-                        out_file_path.display(),
-                        e
-                    );
-                    return;
-                }
-            };
+                .map(PathBuf::as_path);
+            let overwrite = sub_matches.get_flag("overwrite");
 
-            debug!("Writing ftab to {}.", out_file_path.display());
-
-            match Builder::with_manifest(&the_manifest, input_dir)
-                .and_then(|b| b.write_to(&mut out_file))
-            {
-                Ok(()) => info!("Done."),
-                Err(e) => {
-                    error!("An error occurred while building ftab file: {}", e);
-                }
+            if let Err(e) = do_pack(manifest_path, out_file, overwrite) {
+                error!("{}", e);
             }
         }
         Some(_) | None => unreachable!(),

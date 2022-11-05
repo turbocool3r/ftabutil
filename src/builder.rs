@@ -1,6 +1,5 @@
-use crate::{format::*, manifest::Manifest, util};
+use crate::{error::FileOpError, format::*, manifest::Manifest, util};
 use std::{
-    borrow::Cow,
     io::{self, Write},
     mem,
     path::Path,
@@ -22,7 +21,10 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn with_manifest(manifest: &Manifest, dir: &Path) -> io::Result<Self> {
+    pub fn with_manifest(
+        manifest: &Manifest,
+        dir: Option<&Path>,
+    ) -> Result<Self, Box<FileOpError>> {
         let mut data_offset = HEADER_LEN + manifest.segments.len() * SEGMENT_HEADER_LEN;
         let mut segments = Vec::with_capacity(manifest.segments.len());
         let mut data = Vec::new();
@@ -34,14 +36,8 @@ impl Builder {
                 segment.path.display()
             );
 
-            let path = if segment.path.is_absolute() {
-                Cow::from(segment.path.as_path())
-            } else {
-                let mut path = dir.to_path_buf();
-                path.push(&segment.path);
-                Cow::from(path)
-            };
-            let segment_data = util::read_file(path)?;
+            let path = util::qualify_path_if_needed(&segment.path, dir);
+            let segment_data = util::read_file("segment", path)?;
 
             // This will not pad the ticket, but that's how the original ftab builder seems to work
             // so we do it this way.
@@ -69,9 +65,8 @@ impl Builder {
         }
 
         let ticket = if let Some(rel_path) = manifest.ticket.as_ref() {
-            let mut path = dir.to_path_buf();
-            path.push(rel_path);
-            Some(util::read_file(path).map(Vec::into_boxed_slice)?)
+            let path = util::qualify_path_if_needed(rel_path, dir);
+            Some(util::read_file("ticket", path).map(Vec::into_boxed_slice)?)
         } else {
             None
         };
