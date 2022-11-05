@@ -12,7 +12,7 @@ use crate::{
     builder::Builder,
     error::{FileOpError, PackError, UnpackError},
     manifest::{Manifest, SegmentDesc, Tag},
-    parser::FtabParser,
+    parser::Parser,
 };
 use clap::{arg, command, value_parser, Command};
 use log::LevelFilter;
@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn do_print_header(parser: &FtabParser) {
+fn do_print_header(parser: &Parser) {
     println!("unk_0: {:#08x}", parser.unk_0());
     println!("unk_1: {:#08x}", parser.unk_1());
     println!("unk_2: {:#08x}", parser.unk_2());
@@ -79,7 +79,7 @@ fn do_unpack<'a>(
     }
 
     // Parse the header and initialize the parser.
-    let parser = FtabParser::from_bytes(&data).map_err(|e| HeaderParseError(in_file, e))?;
+    let parser = Parser::from_bytes(&data).map_err(|e| HeaderParseError(in_file, e))?;
 
     let mut the_manifest = Manifest::with_parser(&parser);
     let manifest_path = util::qualify_path_if_needed("manifest.toml", out_dir);
