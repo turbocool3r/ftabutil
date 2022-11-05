@@ -76,7 +76,7 @@ fn cut_subslice(slice: &[u8], offset: usize, len: usize, slice_offset: usize) ->
 }
 
 #[derive(Clone, Debug)]
-pub struct FtabParser<'a> {
+pub struct Parser<'a> {
     ticket: Option<&'a [u8]>,
     segments: &'a [[u8; 16]],
     tail: &'a [u8],
@@ -89,7 +89,7 @@ pub struct FtabParser<'a> {
     unk_6: u32,
 }
 
-impl<'a> FtabParser<'a> {
+impl<'a> Parser<'a> {
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, ParseError> {
         if bytes.len() < HEADER_LEN {
             return Err(ParseError::TooShort);

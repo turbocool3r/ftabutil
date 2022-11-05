@@ -1,4 +1,4 @@
-use crate::parser::FtabParser;
+use crate::parser::Parser;
 use serde::{
     de::{self, Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -188,7 +188,7 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn with_parser(parser: &FtabParser) -> Manifest {
+    pub fn with_parser(parser: &Parser) -> Manifest {
         Manifest {
             unk_0: parser.unk_0(),
             unk_1: parser.unk_1(),
