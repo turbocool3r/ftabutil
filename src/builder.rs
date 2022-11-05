@@ -1,3 +1,6 @@
+//! Provides the [`Builder`] structure that can be used to build 'ftab' files from
+//! [`Manifest`](../manifest/struct.Manifest.html)s.
+
 use crate::{error::FileOpError, format::*, manifest::Manifest, util};
 use std::{
     io::{self, Write},
@@ -6,6 +9,10 @@ use std::{
     slice,
 };
 
+/// A builder that can be used to build 'ftab' files from
+/// [`Manifest`](../manifest/struct.Manifest.html)s.
+///
+/// Currently it does not have API to build 'ftab' files from scratch as it is not required.
 #[derive(Default, Clone, Debug)]
 pub struct Builder {
     segments: Vec<SegmentHeader>,
@@ -21,6 +28,12 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Creates a [`Builder`] and fills it using a description from a
+    /// [`Manifest`](../manifest/struct.Manifest.html).
+    ///
+    /// # Errors
+    /// Returns a boxed [`FileOpError`](../error/struct.FileOpError.html) error when one of the
+    /// files from the manifest's segments lists fails to load.
     pub fn with_manifest(
         manifest: &Manifest,
         dir: Option<&Path>,
@@ -85,6 +98,10 @@ impl Builder {
         })
     }
 
+    /// Writes the built 'ftab' into anything implementing the `std::io::Write` trait.
+    ///
+    /// # Errors
+    /// Returns an I/O error in case it ever occurs.
     pub fn write_to<W: Write>(&self, dest: &mut W) -> io::Result<()> {
         let data_offset = HEADER_LEN + self.segments.len() * SEGMENT_HEADER_LEN;
         let header = FtabHeader {
