@@ -4,7 +4,7 @@
 
 A simple utility to build and unpack 'ftab' (aka 'rkosftab') images found in firmware images of accessories produced by Apple.
 
-## A quick into 'ftab' file format
+## A quick intro into 'ftab' file format
 
 'ftab' (which probably means **F**ile **TAB**le) files are simple tables of files where a key is a 4-byte tag (e.g. 'rkos' which stands for **R**T**K**it **OS**) and a value are the contents of the corresponding file. An optional [APTicket](https://www.theiphonewiki.com/wiki/APTicket) may be included as a signature of the file's contents.
 
@@ -38,7 +38,7 @@ unk = 0
 # ...
 ```
 
-Such a manifest can be used with the `pack` subcommand like this:
+A manifest can be used with the `pack` subcommand like this:
 
 ```shell
 ftabutil pack path/to/manifest.toml optional/path/to/ftab.bin
@@ -48,7 +48,7 @@ For more info see documentation for the `pack` subcommand.
 
 ## Unstable access to unknown fields
 
-Some fields of the format are unknown and unused at the time of writing. The tool provides the access to these fields without really documenting them. In the future the names for these fields is very likely to change, so you shouldn't rely on the manifest format to be stable.
+Some fields of the format are unknown and unused at the time of writing. The tool provides the access to these fields without really documenting them. In the future the names for these fields are very likely to change, so you shouldn't rely on the manifest format to be stable.
 
 ## License
 
