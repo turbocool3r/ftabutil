@@ -3,6 +3,9 @@ name = "ftabutil"
 authors = ["turbocooler <turbocooler@cocaine.ninja>"]
 license = "MIT OR Apache-2.0"
 description = "An utility to work with ftab (aka rkosftab) files."
+repository = "https://github.com/turbocool3r/ftabutil"
+keywords = ["ftab", "parsing", "firmware", "apple"]
+categories = ["command-line-utilities", "parser-implementations"]
 version = "0.1.0"
 edition = "2021"
 
