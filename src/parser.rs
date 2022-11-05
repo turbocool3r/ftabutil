@@ -1,24 +1,42 @@
+//! Provides the [`Parser`] and [`SegmentParser`] structures that can be used to parse in-memory
+//! 'ftab' files.
+
+/// Provides [`ParseError`] and [`OobSegmentError`] that describe errors which may occur in
+/// [`Parser::parse`] and [`SegmentParser::next_segment`] methods.
 pub mod error {
     use std::{error::Error, fmt};
     use thiserror::Error;
 
+    /// An error which may occur when parsing the 'ftab' file header.
     #[derive(Error, Debug)]
     pub enum ParseError {
+        /// Returned when a file provided to a [`Parser`](../struct.Parser.html) is shorter than the
+        /// size of a 'ftab' header.
         #[error("file is too short to be a ftab file")]
         TooShort,
+        /// Returned when a file provided to a [`Parser`](../struct.Parser.html) does not contain
+        /// the 'rkosftab' magic value at the specified offset.
         #[error("file is not a ftab file (invalid magic value)")]
         UnknownMagic,
+        /// Returned when the product of the segments count from the 'ftab' header and the size of
+        /// a segment list entry will overflow the size of the `usize` type.
         #[error("segments list byte length is too large")]
         OverflowingSegmentsLength,
+        /// Returned when the end of the segments list exceeds past the end of a file.
         #[error("segments list is larger than the space available in the file")]
         OobSegmentsList,
+        /// Returned when the range of a ticket exceeds past the end of a file or overlaps with
+        /// either the header or the segment list.
         #[error("ticket range in file is out of bounds")]
         OobTicket,
     }
 
+    /// Returned when the range of a 'ftab' file segment specified in its segment list entry exceeds
+    /// past the end of the file or overlaps with either the header or the segment list.
     #[derive(Debug)]
     #[non_exhaustive]
     pub struct OobSegmentError {
+        /// The tag specified in the segment list entry.
         pub tag: [u8; 4],
     }
 
@@ -75,6 +93,7 @@ fn cut_subslice(slice: &[u8], offset: usize, len: usize, slice_offset: usize) ->
     }
 }
 
+/// A parser that can be used to parse the 'ftab' file header and produce a [`SegmentsParser`].
 #[derive(Clone, Debug)]
 pub struct Parser<'a> {
     ticket: Option<&'a [u8]>,
@@ -90,7 +109,15 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, ParseError> {
+    /// Parse the provided byte slice as a 'ftab' file and return a [`Parser`].
+    ///
+    /// # Errors
+    /// This method will return a [`ParseError`] in case the provided
+    /// slice does not contain a valid 'ftab' file. For more info on the specific cases when this
+    /// may happen see docs for individual [`ParseError`] variants.
+    ///
+    /// [`ParseError`]: error/enum.ParseError.html
+    pub fn parse(bytes: &'a [u8]) -> Result<Self, ParseError> {
         if bytes.len() < HEADER_LEN {
             return Err(ParseError::TooShort);
         }
@@ -162,45 +189,55 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Returns the `unk_0` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_0(&self) -> u32 {
         self.unk_0
     }
 
+    /// Returns the `unk_1` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_1(&self) -> u32 {
         self.unk_1
     }
 
+    /// Returns the `unk_2` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_2(&self) -> u32 {
         self.unk_2
     }
 
+    /// Returns the `unk_3` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_3(&self) -> u32 {
         self.unk_3
     }
 
+    /// Returns the `unk_4` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_4(&self) -> u32 {
         self.unk_4
     }
 
+    /// Returns the `unk_5` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_5(&self) -> u32 {
         self.unk_5
     }
 
+    /// Returns the `unk_6` field of the 'ftab' header. Its purpose is currently unknown.
     #[inline]
     pub fn unk_6(&self) -> u32 {
         self.unk_6
     }
 
+    /// Returns the slice containing the APTicket included into the 'ftab' file or `None` if an
+    /// APTicket is not included.
     pub fn ticket(&self) -> Option<&'a [u8]> {
         self.ticket
     }
 
+    /// Returns a [`SegmentsParser`] over the segment list of the parsed 'ftab' file.
     #[inline]
     pub fn segments(&self) -> SegmentsParser<'a> {
         SegmentsParser {
@@ -213,13 +250,20 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// A description of a parsed segment.
 #[derive(Clone, Debug)]
 pub struct ParsedSegment<'a> {
+    /// The segment's tag in the segment list.
     pub tag: [u8; 4],
+    /// The segment's contents.
     pub data: &'a [u8],
+    /// An field with a currently unknown purpose from the segment list entry.
+    ///
+    /// At the time of writing it seems to be ignored by software interpreting the format.
     pub unk: u32,
 }
 
+/// A parser for segment lists of 'ftab' files.
 #[derive(Clone, Debug)]
 pub struct SegmentsParser<'a> {
     headers: &'a [[u8; SEGMENT_HEADER_LEN]],
@@ -228,6 +272,12 @@ pub struct SegmentsParser<'a> {
 }
 
 impl<'a> SegmentsParser<'a> {
+    /// Parses a segment list entry into a [`ParsedSegment`] and advances the parser to the next
+    /// entry. Returns `None` when the last segment has been processed.
+    ///
+    /// # Errors
+    /// This function will return an [`OobSegmentError`](error/struct.OobSegmentError.html) when
+    /// a segment list entry is encountered which points outside the range of the file.
     pub fn next_segment(&mut self) -> Result<Option<ParsedSegment>, OobSegmentError> {
         let Some((bytes, tail)) = self.headers.split_first() else {
             return Ok(None);
@@ -254,6 +304,7 @@ impl<'a> SegmentsParser<'a> {
         Ok(Some(ParsedSegment { tag, data, unk }))
     }
 
+    /// Returns the remaining count of the segment list to be parsed.
     pub fn count(&self) -> usize {
         self.headers.len()
     }
