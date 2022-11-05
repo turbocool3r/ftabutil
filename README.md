@@ -1,5 +1,7 @@
 # ftabutil
 
+[![Crates.io](https://img.shields.io/crates/v/ftabutil.svg)](https://crates.io/crates/ftabutil)
+
 A simple utility to build and unpack 'ftab' (aka 'rkosftab') images found in firmware images of accessories produced by Apple.
 
 ## A quick into 'ftab' file format
