@@ -1,4 +1,5 @@
 use crate::error::FileOpError;
+use dialoguer::Confirm;
 use std::{
     borrow::Cow,
     fs::{File, OpenOptions},
@@ -28,20 +29,51 @@ fn create_file_impl(
     name: &'static str,
     path: &Path,
     overwrite: bool,
+    silent: bool,
 ) -> Result<File, Box<FileOpError>> {
-    OpenOptions::new()
+    let map_error = |error| FileOpError::make_create(name, path.to_path_buf(), error);
+    let result = OpenOptions::new()
         .write(true)
         .create_new(!overwrite)
         .create(overwrite)
         .truncate(overwrite)
         .open(path)
-        .map_err(|error| FileOpError::make_create(name, path.to_path_buf(), error))
+        .map_err(map_error);
+
+    let Err(error) = result else {
+        return result
+    };
+
+    // In case neither the overwrite flag nor the silent flag was passed, we want to ask the user if
+    // they want to overwrite the file on receiving a "file exists" error.
+    if !overwrite && !silent && error.is_exists() && path.is_file() {
+        let response = Confirm::new()
+            .with_prompt(format!(
+                "Do you want to overwrite the file at '{}'?",
+                path.display()
+            ))
+            .default(false)
+            .interact()
+            .expect("failed to display a prompt to the user");
+
+        if response {
+            return OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(path)
+                .map_err(map_error);
+        }
+    }
+
+    Err(error)
 }
 
 /// Creates a file at the specified path.
 ///
 /// In case the `overwrite` argument is `true`, the file will be either created or truncated if it
-/// exists, otherwise an existing file at the specified path will cause an error to be returned.
+/// exists, otherwise in case `silent` is `false` the user will be asked if overwriting the file is
+/// ok, otherwise an error will be returned.
 ///
 /// # Errors
 /// This function will return a boxed `FileOpError` with the `FileOpAction::Create` action in case
@@ -50,8 +82,9 @@ pub fn create_file<P: AsRef<Path>>(
     name: &'static str,
     path: P,
     overwrite: bool,
+    silent: bool,
 ) -> Result<File, Box<FileOpError>> {
-    create_file_impl(name, path.as_ref(), overwrite)
+    create_file_impl(name, path.as_ref(), overwrite, silent)
 }
 
 fn save_file_impl(
@@ -59,8 +92,9 @@ fn save_file_impl(
     path: &Path,
     data: &[u8],
     overwrite: bool,
+    silent: bool,
 ) -> Result<(), Box<FileOpError>> {
-    create_file(name, path, overwrite)?
+    create_file(name, path, overwrite, silent)?
         .write_all(data)
         .map_err(|error| FileOpError::make_write(name, path.to_path_buf(), error))?;
 
@@ -72,8 +106,9 @@ fn save_file_impl(
 /// Creates a file at the specified path and writes data from a slice into it.
 ///
 /// In case the `overwrite` argument is `true`, the file will be either created or truncated and
-/// overwritten if it exists, otherwise an existing file at the specified path will cause an error
-/// to be returned.
+/// overwritten if it exists. If the `overwrite` argument is false either a prompt will be
+/// displayed to the user to try and open an existing file truncating it or, in case the `silent`
+/// argument is `true`, an error will be returned.
 ///
 /// File creation is handled by the [`create_file`] function internally.
 ///
@@ -86,8 +121,9 @@ pub fn save_file<P: AsRef<Path>>(
     path: P,
     data: &[u8],
     overwrite: bool,
+    silent: bool,
 ) -> Result<(), Box<FileOpError>> {
-    save_file_impl(name, path.as_ref(), data, overwrite)
+    save_file_impl(name, path.as_ref(), data, overwrite, silent)
 }
 
 fn qualify_path_if_needed_impl<'a>(path: &'a Path, dir: Option<&Path>) -> Cow<'a, Path> {
