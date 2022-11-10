@@ -53,6 +53,7 @@ fn do_unpack<'a>(
     overwrite: bool,
     create_parent_dirs: bool,
     print_header: bool,
+    silent: bool,
 ) -> Result<(), UnpackError<'a>> {
     use UnpackError::*;
 
@@ -93,7 +94,7 @@ fn do_unpack<'a>(
         filename.push("ApImg4Ticket.der");
 
         let ticket_path = util::qualify_path_if_needed(&filename, out_dir);
-        util::save_file("ticket", ticket_path, ticket, overwrite)?;
+        util::save_file("ticket", ticket_path, ticket, overwrite, silent)?;
 
         the_manifest.ticket = Some(filename);
     }
@@ -104,7 +105,13 @@ fn do_unpack<'a>(
         match segments_parser.next_segment()? {
             None => {
                 let serialized_manifest = toml::to_vec(&the_manifest).unwrap();
-                util::save_file("manifest", manifest_path, &serialized_manifest, overwrite)?;
+                util::save_file(
+                    "manifest",
+                    manifest_path,
+                    &serialized_manifest,
+                    overwrite,
+                    silent,
+                )?;
 
                 info!("Done.");
 
@@ -114,7 +121,7 @@ fn do_unpack<'a>(
                 let filename = filename_for_tag(segment.tag);
                 let path = util::qualify_path_if_needed(&filename, out_dir);
 
-                util::save_file("segment", path, segment.data, overwrite)?;
+                util::save_file("segment", path, segment.data, overwrite, silent)?;
 
                 the_manifest.segments.push(SegmentDesc {
                     path: filename,
@@ -130,6 +137,7 @@ fn do_pack<'a>(
     manifest_path: &'a Path,
     out_path: Option<&'a Path>,
     overwrite: bool,
+    silent: bool,
 ) -> Result<(), PackError<'a>> {
     use PackError::*;
 
@@ -141,7 +149,7 @@ fn do_pack<'a>(
     // create the output file
     let input_dir = manifest_path.parent();
     let out_file_path = util::qualify_path_or_default_if_needed(out_path, input_dir, "ftab.bin");
-    let mut out_file = util::create_file("output file", &out_file_path, overwrite)?;
+    let mut out_file = util::create_file("output file", &out_file_path, overwrite, silent)?;
 
     debug!("Writing ftab to {}.", out_file_path.display());
 
@@ -172,6 +180,11 @@ fn main() {
                     "Configures the log level for the tool. Available log levels are: NONE \
                     (disables logging entirely), TRACE, DEBUG, INFO, WARN and ERROR.",
                 ),
+        )
+        .arg(
+            arg!(silent: -s --silent).help(
+                "Makes all user prompts take their default action instead of being displayed.",
+            ),
         )
         .subcommand(
             Command::new("unpack")
@@ -230,6 +243,7 @@ fn main() {
         _ => LevelFilter::Warn,
     };
     let print_header = matches.get_flag("print_header");
+    let silent = matches.get_flag("silent");
 
     SimpleLogger::new().with_level(log_level).init().unwrap();
 
@@ -247,6 +261,7 @@ fn main() {
                 overwrite,
                 create_parent_dirs,
                 print_header,
+                silent,
             ) {
                 error!("{}", e);
             }
@@ -258,7 +273,7 @@ fn main() {
                 .map(PathBuf::as_path);
             let overwrite = sub_matches.get_flag("overwrite");
 
-            if let Err(e) = do_pack(manifest_path, out_file, overwrite) {
+            if let Err(e) = do_pack(manifest_path, out_file, overwrite, silent) {
                 error!("{}", e);
             }
         }

@@ -68,6 +68,11 @@ impl FileOpError {
     pub fn make_write(name: &'static str, path: PathBuf, error: io::Error) -> Box<Self> {
         Self::boxed(FileOpAction::Write, name, path, error)
     }
+
+    /// Checks if the underlying error kind is `ErrorKind::AlreadyExists`.
+    pub fn is_exists(&self) -> bool {
+        self.error.kind() == io::ErrorKind::AlreadyExists
+    }
 }
 
 impl fmt::Display for FileOpError {
